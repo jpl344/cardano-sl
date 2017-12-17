@@ -39,9 +39,8 @@ import           Pos.Util                         (eitherToThrow, maybeThrow)
 import           Pos.Wallet.KeyStorage            (getSecretKeys)
 import           Pos.Wallet.Web.Account           (GenSeed (..), getSKByAddressPure,
                                                    getSKById)
-import           Pos.Wallet.Web.ClientTypes       (AccountId (..), Addr, CAddress (..),
-                                                   CCoin, CId, CTx (..),
-                                                   CWAddressMeta (..), Wal,
+import           Pos.Wallet.Web.ClientTypes       (AccountId (..), Addr, CCoin, CId,
+                                                   CTx (..), CWAddressMeta (..), Wal,
                                                    addrMetaToAccount, mkCCoin)
 import           Pos.Wallet.Web.Error             (WalletError (..))
 import           Pos.Wallet.Web.Methods.History   (addHistoryTx, constructCTx,
@@ -52,10 +51,12 @@ import           Pos.Wallet.Web.Methods.Txp       (coinDistrToOutputs, rewrapTxE
 import           Pos.Wallet.Web.Mode              (MonadWalletWebMode, WalletWebMode,
                                                    convertCIdTOAddrs)
 import           Pos.Wallet.Web.Pending           (mkPendingTx)
-import           Pos.Wallet.Web.State             (AddressLookupMode (Ever, Existing))
+import           Pos.Wallet.Web.State             (AddressLookupMode (Ever, Existing),
+                                                   NeedSorting (..))
 import           Pos.Wallet.Web.Util              (decodeCTypeOrFail,
                                                    getAccountAddrsOrThrow,
-                                                   getWalletAccountIds, getWalletAddrsSet)
+                                                   getWalletAccountIds,
+                                                   getWalletAddrsDetector)
 
 newPayment
     :: MonadWalletWebMode m
@@ -97,7 +98,7 @@ data MoneySource
 getMoneySourceAddresses :: MonadWalletWebMode m => MoneySource -> m [CWAddressMeta]
 getMoneySourceAddresses (AddressMoneySource addrId) = return $ one addrId
 getMoneySourceAddresses (AccountMoneySource accId) =
-    getAccountAddrsOrThrow Existing accId
+    getAccountAddrsOrThrow Existing (NeedSorting False) accId
 getMoneySourceAddresses (WalletMoneySource wid) =
     getWalletAccountIds wid >>=
     concatMapM (getMoneySourceAddresses . AccountMoneySource)
@@ -137,8 +138,8 @@ instance
   where
     type AddrData Pos.Wallet.Web.Mode.WalletWebMode = (AccountId, PassPhrase)
     getNewAddress (accId, passphrase) = do
-        clientAddress <- L.newAddress RandomSeed passphrase accId
-        decodeCTypeOrFail (cadId clientAddress)
+        cAddrMeta <- L.newAddress_ RandomSeed passphrase accId
+        decodeCTypeOrFail (cwamId cAddrMeta)
 
 sendMoney
     :: MonadWalletWebMode m
@@ -199,8 +200,8 @@ sendMoney SendActions{..} passphrase moneySource dstDistr = do
         return th
 
     addHistoryTx srcWallet th
-    srcWalletAddrs <- getWalletAddrsSet Ever srcWallet
     diff <- getCurChainDifficulty
+    srcWalletAddrsDetector <- getWalletAddrsDetector Ever srcWallet
 
     logDebug "sendMoney: constructing response"
-    fst <$> constructCTx srcWallet srcWalletAddrs diff th
+    fst <$> constructCTx srcWallet srcWalletAddrsDetector diff th

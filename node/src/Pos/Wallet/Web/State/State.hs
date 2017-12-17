@@ -5,6 +5,7 @@ module Pos.Wallet.Web.State.State
        , MonadWalletWebDB
        , WalletTip (..)
        , PtxMetaUpdate (..)
+       , AddressInfo (..)
        , getWalletWebState
        , WebWalletModeDB
        , openState
@@ -13,6 +14,8 @@ module Pos.Wallet.Web.State.State
 
        , AddressLookupMode (..)
        , CustomAddressType (..)
+       , NeedSorting (..)
+       , CurrentAndRemoved (..)
 
        -- * Getters
        , getProfile
@@ -20,6 +23,7 @@ module Pos.Wallet.Web.State.State
        , getAccountIds
        , getAccountMetas
        , getAccountMeta
+       , getAccountAddrMaps
        , getAccountWAddresses
        , getWalletMetas
        , getWalletMeta
@@ -101,10 +105,11 @@ import           Pos.Wallet.Web.Pending.Types (PendingTx (..), PtxCondition)
 import           Pos.Wallet.Web.State.Acidic  (WalletState, closeState, openMemState,
                                                openState)
 import           Pos.Wallet.Web.State.Acidic  as A
-import           Pos.Wallet.Web.State.Storage (AddressLookupMode (..),
-                                               CustomAddressType (..), PtxMetaUpdate (..),
-                                               WalletBalances, WalletStorage,
-                                               WalletTip (..))
+import           Pos.Wallet.Web.State.Storage (AddressInfo (..), AddressLookupMode (..),
+                                               CurrentAndRemoved (..),
+                                               CustomAddressType (..), NeedSorting (..),
+                                               PtxMetaUpdate (..), WalletBalances,
+                                               WalletStorage, WalletTip (..))
 
 -- | MonadWalletWebDB stands for monad which is able to get web wallet state
 type MonadWalletWebDB ctx m =
@@ -141,6 +146,11 @@ getAccountMetas = queryDisk A.GetAccountMetas
 getAccountMeta :: WebWalletModeDB ctx m => AccountId -> m (Maybe CAccountMeta)
 getAccountMeta = queryDisk . A.GetAccountMeta
 
+getAccountAddrMaps
+    :: WebWalletModeDB ctx m
+    => AccountId -> m (CurrentAndRemoved (HashMap (CId Addr) AddressInfo))
+getAccountAddrMaps = queryDisk . A.GetAccountAddrMaps
+
 getWalletAddresses :: WebWalletModeDB ctx m => m [CId Wal]
 getWalletAddresses = queryDisk A.GetWalletAddresses
 
@@ -161,8 +171,8 @@ getWalletSyncTip = queryDisk . A.GetWalletSyncTip
 
 getAccountWAddresses
     :: WebWalletModeDB ctx m
-    => AddressLookupMode -> AccountId -> m (Maybe [CWAddressMeta])
-getAccountWAddresses mode = queryDisk . A.GetAccountWAddresses mode
+    => AddressLookupMode -> NeedSorting -> AccountId -> m (Maybe [CWAddressMeta])
+getAccountWAddresses = queryDisk ... A.GetAccountWAddresses
 
 doesWAddressExist
     :: WebWalletModeDB ctx m
