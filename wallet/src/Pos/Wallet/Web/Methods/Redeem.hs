@@ -15,6 +15,7 @@ import qualified Serokell.Util.Base64           as B64
 import           Pos.Aeson.ClientTypes          ()
 import           Pos.Aeson.WalletBackup         ()
 import           Pos.Client.Txp.Addresses       (MonadAddresses)
+import           Pos.Client.Txp.Balances        (getOwnUtxosDefault)
 import           Pos.Client.Txp.History         (TxHistoryEntry (..))
 import           Pos.Communication              (SendActions (..), prepareRedemptionTx)
 import           Pos.Core                       (getCurrentTimestamp)
@@ -35,7 +36,8 @@ import qualified Pos.Wallet.Web.Methods.Logic   as L
 import           Pos.Wallet.Web.Methods.Txp     (rewrapTxError, submitAndSaveNewPtx)
 import           Pos.Wallet.Web.Mode            (MonadWalletWebMode)
 import           Pos.Wallet.Web.Pending         (mkPendingTx)
-import           Pos.Wallet.Web.State           (AddressLookupMode (Ever))
+import           Pos.Wallet.Web.State           (getWalletSnapshot,
+                                                 AddressLookupMode (Ever))
 import           Pos.Wallet.Web.Util            (decodeCTypeOrFail, getWalletAddrsSet)
 
 
@@ -88,13 +90,14 @@ redeemAdaInternal SendActions {..} passphrase cAccId seedBs = do
                      redeemDeterministicKeyGen seedBs
     accId <- decodeCTypeOrFail cAccId
     -- new redemption wallet
-    _ <- L.getAccount accId
+    _ <- L.getAccount accId --TODO: what is this for?
 
     dstAddr <- decodeCTypeOrFail . cadId =<<
-               L.newAddress RandomSeed passphrase accId
+               L.newAddress RandomSeed passphrase accId --TODO: reads DB again!
+    ws <- getWalletSnapshot --TODO: aaaarg!
     th <- rewrapTxError "Cannot send redemption transaction" $ do
         (txAux, redeemAddress, redeemBalance) <-
-                prepareRedemptionTx redeemSK dstAddr
+                prepareRedemptionTx (getOwnUtxosDefault ws) redeemSK dstAddr
 
         ts <- Just <$> getCurrentTimestamp
         let tx = taTx txAux
@@ -102,13 +105,14 @@ redeemAdaInternal SendActions {..} passphrase cAccId seedBs = do
             txInputs = [TxOut redeemAddress redeemBalance]
             th = THEntry txHash tx Nothing txInputs [dstAddr] ts
             dstWallet = aiWId accId
-        ptx <- mkPendingTx dstWallet txHash txAux th
+        ptx <- mkPendingTx ws dstWallet txHash txAux th
 
         th <$ submitAndSaveNewPtx enqueueMsg ptx
 
     -- add redemption transaction to the history of new wallet
     let cWalId = aiWId accId
     addHistoryTx cWalId th
-    cWalAddrs <- getWalletAddrsSet Ever cWalId
+    ws' <- getWalletSnapshot --TODO: is re-reading needed?
+    cWalAddrs <- getWalletAddrsSet ws' Ever cWalId
     diff <- getCurChainDifficulty
-    fst <$> constructCTx cWalId cWalAddrs diff th
+    fst <$> constructCTx ws' cWalId cWalAddrs diff th
